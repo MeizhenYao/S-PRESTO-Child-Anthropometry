@@ -13,27 +13,11 @@ library(anthro)
 library(writexl)
 
 #-------------------------------------------------------import data set
-whole_blood<-  read_excel("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/chemical & maternal/whole_blood.xlsx")
-whole_cohort<-  read_excel("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/chemical & maternal/whole_cohort.xlsx")
+whole_cohort<-  read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/for paper/whole_cohort_20230316.csv")
 
 
 #-------------------------------------------------------data preparation
 
-## create dummy variable for participation in blood sample in whole cohort
-whole_blood$participation<- rep(1,384)
-whole_cohort<- whole_cohort %>% 
-  left_join(whole_blood[,c("Subject_ID","participation")], by="Subject_ID") 
-whole_cohort$participation<- ifelse(is.na(whole_cohort$participation)==TRUE, 0, 1)
-
-## create dummy variable for live birth
-whole_cohort$live_birth_recat<- whole_cohort$live_birth
-for (i in 1:nrow(whole_cohort)){
-  if(is.na(whole_cohort$ttp_pregnant_ref[i])==TRUE) {whole_cohort$live_birth_recat[i]<- NA}
-  else if ((is.na(whole_cohort$ttp_pregnant_ref[i])==FALSE) & (is.na(whole_cohort$live_birth[i]) == FALSE)) {whole_cohort$live_birth_recat[i]<- 1}
-  else {whole_cohort$live_birth_recat[i]<- 0}
-}
-
-whole_cohort$live_birth_recat<- as.numeric(whole_cohort$live_birth_recat)
 
 ## Restricted to participants with a blood sample and a live birth
 blood<- whole_cohort %>% 
@@ -87,6 +71,7 @@ blood_child = blood_child[!(is.na(blood_child$Days_since_birth_del) &
                               is.na(blood_child$Days_since_birth_m12) &
                               is.na(blood_child$Days_since_birth_m18)), ]
 
+# write_csv(blood_child, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_before_imputed.csv")
 
 #------------------------------------------------------- imputation (prediction model only include child anthropometry variables)
 ###------------------------------------------------------------------------------ weights & length & bw_sex & GA
@@ -151,7 +136,7 @@ sapply(blood_child_days_imputed, function(x) sum(is.na(x)))
 blood_child_imputed<- data.frame(blood_child[, c("Subject_ID")],
                                  blood_child_weights_lengths_imputed,
                                  blood_child_days_imputed) %>% 
-                      mutate(measure="L")
+  mutate(measure="L")
 
 
 # write_csv(blood_child_imputed, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_imputed.csv")
@@ -263,14 +248,14 @@ names(blood_child_who_stan_m18)<- c("zweight_m18", "zlength_m18", "zbmi_m18", "z
 
 # Internal z-scores for weight-to-height ratio
 wfl_internal_zscores<- blood_child_imputed %>% 
-                       transmute(zwfl_internal_del = (weight_del/(1000*length_del) - mean(weight_del/(1000*length_del)))/sd(weight_del/(1000*length_del)),
-                              zwfl_internal_wk1 = (weight_wk1/(1000*length_wk1) - mean(weight_wk1/(1000*length_wk1)))/sd(weight_wk1/(1000*length_wk1)),
-                              zwfl_internal_wk3 = (weight_wk3/(1000*length_wk3) - mean(weight_wk3/(1000*length_wk3)))/sd(weight_wk3/(1000*length_wk3)),
-                              zwfl_internal_wk6 = (weight_wk6/(1000*length_wk6) - mean(weight_wk6/(1000*length_wk6)))/sd(weight_wk6/(1000*length_wk6)),
-                              zwfl_internal_m3 = (weight_m3/(1000*length_m3) - mean(weight_m3/(1000*length_m3)))/sd(weight_m3/(1000*length_m3)),
-                              zwfl_internal_m6 = (weight_m6/(1000*length_m6) - mean(weight_m6/(1000*length_m6)))/sd(weight_m6/(1000*length_m6)),
-                              zwfl_internal_m12 = (weight_m12/(1000*length_m12) - mean(weight_m12/(1000*length_m12)))/sd(weight_m12/(1000*length_m12)),
-                              zwfl_internal_m18 = (weight_m18/(1000*length_m18) - mean(weight_m18/(1000*length_m18)))/sd(weight_m18/(1000*length_m18)))
+  transmute(zwfl_internal_del = (weight_del/(1000*length_del) - mean(weight_del/(1000*length_del)))/sd(weight_del/(1000*length_del)),
+            zwfl_internal_wk1 = (weight_wk1/(1000*length_wk1) - mean(weight_wk1/(1000*length_wk1)))/sd(weight_wk1/(1000*length_wk1)),
+            zwfl_internal_wk3 = (weight_wk3/(1000*length_wk3) - mean(weight_wk3/(1000*length_wk3)))/sd(weight_wk3/(1000*length_wk3)),
+            zwfl_internal_wk6 = (weight_wk6/(1000*length_wk6) - mean(weight_wk6/(1000*length_wk6)))/sd(weight_wk6/(1000*length_wk6)),
+            zwfl_internal_m3 = (weight_m3/(1000*length_m3) - mean(weight_m3/(1000*length_m3)))/sd(weight_m3/(1000*length_m3)),
+            zwfl_internal_m6 = (weight_m6/(1000*length_m6) - mean(weight_m6/(1000*length_m6)))/sd(weight_m6/(1000*length_m6)),
+            zwfl_internal_m12 = (weight_m12/(1000*length_m12) - mean(weight_m12/(1000*length_m12)))/sd(weight_m12/(1000*length_m12)),
+            zwfl_internal_m18 = (weight_m18/(1000*length_m18) - mean(weight_m18/(1000*length_m18)))/sd(weight_m18/(1000*length_m18)))
 
 ## combine all datasets and add 
 blood_child_who_stan<- data.frame(blood_child_imputed[,c("Subject_ID", child_age, "bw_sex", "bw_birth_GA")],

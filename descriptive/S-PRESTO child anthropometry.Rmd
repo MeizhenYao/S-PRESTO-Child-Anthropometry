@@ -1,0 +1,964 @@
+---
+title: "S-PRESTO child anthropometry descriptive analysis"
+author: "Meizhen Yao"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    df_print: paged
+    fig_caption: yes
+    fig_height: 7
+    fig_width: 10
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    self_contained: yes
+    code_folding: hide
+    toc_depth: 6
+header-includes: \usepackage{multirow}
+---
+
+<style type="text/css">
+body{
+  /*font-family: Helvetica;*/
+  font-size: 12pt;
+}
+</style>
+
+```{r setup, include=FALSE}
+options(digits = 4)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,cache=F,warning = FALSE)
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(qwraps2_markup = "markdown")
+
+```
+
+
+```{r,message=FALSE,warning=FALSE,include=FALSE}
+library(clubSandwich)
+library(WeightIt)
+library(ResourceSelection)
+library(parameters)
+library(sjstats)
+library(rms)
+library(survminer)
+library(survival)
+library(broom)
+library("data.table")   
+library(gtsummary)
+library(gt)
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(gridExtra)
+library(readxl)
+library(sandwich)
+library(boot)
+library(table1)
+library(flextable)
+library(plyr)
+library(Rcpp)
+library(modelr)
+library(lme4)
+library(nlme)
+library(readr)
+library(gWQS)
+library(broom.mixed)
+library(yaml)
+library(rmarkdown)
+library(officer)
+library(scales)
+library(ipw)
+library(spatstat)
+library(survey)
+library(MatchIt)
+library(devtools)
+library(cobalt)
+# install_version("optmatch", version = "0.9.17", repos = "http://cran.us.r-project.org")
+# install_github("markmfredrickson/RItools")
+library(RItools)
+library(optmatch)
+library(mice)
+library(gtsummary)
+library(tidyr)
+library(tidyverse)
+library(grid)
+library(gtable)
+library(ggh4x)
+library(naniar)
+library(UpSetR)
+
+#-------------------------------------------------------import data set
+whole_cohort<-  read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/for paper/whole_cohort_20230316.csv")
+
+blood_child_before_imputed<- read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_before_imputed.csv")
+
+
+########################################################
+## whole cohort
+###create dummy variable for participation in child adiposity measurement
+
+blood_child_before_imputed$child_participation<- rep(1,nrow(blood_child_before_imputed))
+
+whole_cohort<- whole_cohort %>% 
+               left_join(blood_child_before_imputed[,c("Subject_ID","child_participation")], by="Subject_ID") 
+
+whole_cohort$child_participation<- ifelse(is.na(whole_cohort$child_participation)==TRUE, 0, 1)
+
+#--------------------------------------------------------------------------------------------------------------
+
+### demographic factors
+
+### demographic factors ### 
+#### Analysis Batch
+whole_cohort$Analysis_Batch_recat<- factor(whole_cohort$Analysis_Batch_recat,
+                                     levels = c("B6","B2","B3","B4","B5"))
+
+
+#### ethnicity categorization
+whole_cohort$ethnicity_specified_recat<- factor(whole_cohort$ethnicity_specified_recat,
+                                           levels=c("Chinese","Malay","Indian"))
+#### highest education                            
+whole_cohort$pcv1_highest_education_completed_recat<- factor(whole_cohort$pcv1_highest_education_completed_recat,
+                                           levels=c("University","Primary/Secondary/Post_secondary"))
+#### parity status
+whole_cohort$pcv1_parity_recat<- factor(whole_cohort$pcv1_parity_recat,
+                                  levels=c("0",">= 1"))
+
+#### smoking status
+whole_cohort$pcv1_smoker<- factor(whole_cohort$pcv1_smoker,
+                                  levels = c(0:2),
+                                  labels = c("Never smoke", "Smoker", "Ex-smoker")) 
+ 
+
+
+label(whole_cohort$anogenital_M3_finalavg)<- "Anogenital Distance at Month 3 (mm)"
+label(whole_cohort$anogenital_M12_finalavg)<- "Anogenital Distance at Month 12 (mm)"
+label(whole_cohort$anogenital_delv_finalavg)<- "Anogenital Distance at Delivery (mm)"
+label(whole_cohort$weight_del_CN)<- "Weight at Delivery (from hospital Casenotes) (g)"
+label(whole_cohort$weight_del)<- "Weight  at Delivery (from RC) (g)"
+label(whole_cohort$weight_wk1)<- "Weight at Week 1 (g)"
+label(whole_cohort$weight_wk3)<- "Weight at Week 3 (g)"
+label(whole_cohort$weight_wk6)<- "Weight at Week 6 (g)"
+label(whole_cohort$weight_m3)<- "Weight  at Week at Month 3 (g)" 
+label(whole_cohort$weight_m6)<- "Weight  at Week at Month 6 (g)"
+label(whole_cohort$weight_m12)<- "Weight  at Week at Month 12 (g)"
+label(whole_cohort$weight_m18)<- "Weight  at Week at Month 18 (g)"
+label(whole_cohort$length_del_CN)<- "Length at Delivery (from Casenotes) (cm)"
+label(whole_cohort$length_del)<- "Length at Delivery (from RC) (cm)"
+label(whole_cohort$length_wk1)<- "Length at Week 1 (cm)"
+label(whole_cohort$length_wk3)<- "Length at Week 3 (cm)"
+label(whole_cohort$length_wk6)<- "Length at Week 6 (cm)"
+label(whole_cohort$length_m3)<- "Length at Month 3 (cm)"
+label(whole_cohort$length_m6)<- "Length at Month 6 (cm)"
+label(whole_cohort$length_m12)<- "Length at Month 12 (cm)"
+label(whole_cohort$length_m18)<- "Length at Month 18 (cm)"
+label(whole_cohort$head_del_CN)<- "Head Circumference at Delivery (Casenotes) (cm)"
+label(whole_cohort$head_del)<- "Head Circumference at Delivery (RC) (cm)"
+label(whole_cohort$head_wk1)<- "Head Circumference at Week 1 (cm)"
+label(whole_cohort$head_wk3)<- "Head Circumference at Week 3 (cm)"
+label(whole_cohort$head_wk6)<- "Head Circumference at Week 6 (cm)"
+label(whole_cohort$head_m3)<- "Head Circumference at Month 3 (cm)"
+label(whole_cohort$head_m6)<- "Head Circumference at Month 6 (cm)"
+label(whole_cohort$head_m12)<- "Head Circumference at Month 12 (cm)"
+label(whole_cohort$head_m18)<- "Head Circumference at Month 18 (cm)"
+label(whole_cohort$abdominal_del)<- "Abdominal Circumference at Delivery (RC) (cm)"
+label(whole_cohort$abdominal_wk1)<- "Abdominal Circumference at Week 1 (cm)"
+label(whole_cohort$abdominal_wk3)<- "Abdominal Circumference at Week 3 (cm)"
+label(whole_cohort$abdominal_wk6)<- "Abdominal Circumference at Week 6 (cm)"
+label(whole_cohort$abdominal_m3)<- "Abdominal Circumference at Month 3 (cm)"
+label(whole_cohort$abdominal_m6)<- "Abdominal Circumference  at Month 6 (cm)"
+label(whole_cohort$abdominal_m12)<- "Abdominal Circumference at Month 12 (cm)"
+label(whole_cohort$abdominal_m18)<- "Abdominal Circumference  at Month 18 (cm)"
+label(whole_cohort$midarm_del)<- "Midarm Circumference at Delivery (RC) (cm)"
+label(whole_cohort$midarm_wk1)<- "Midarm Circumference  at Week 1 (cm)"
+label(whole_cohort$midarm_wk3)<- "Midarm Circumference  at Week 3 (cm)"
+label(whole_cohort$midarm_wk6)<- "Midarm Circumference  at Week 6 (cm)"
+label(whole_cohort$midarm_m3)<- "Midarm Circumference at Month 3 (cm)"
+label(whole_cohort$midarm_m6)<- "Midarm Circumference  at Month 6 (cm)"
+label(whole_cohort$midarm_m12)<- "Midarm Circumference  at Month 12 (cm)"
+label(whole_cohort$midarm_m18)<- "Midarm Circumference  at Month 18 (cm)"
+label(whole_cohort$triceps_del)<- "Triceps Skinfold at Delivery (RC) (mm)"
+label(whole_cohort$triceps_wk1)<- "Triceps Skinfold at Week 1 (mm)"
+label(whole_cohort$triceps_wk3)<- "Triceps Skinfold at Week 3 (mm)"
+label(whole_cohort$triceps_wk6)<- "Triceps Skinfold at Week 6 (mm)"
+label(whole_cohort$triceps_m3)<- "Triceps Skinfold at Month 3 (mm)"
+label(whole_cohort$triceps_m6)<- "Triceps Skinfold at Month 6 (mm)"
+label(whole_cohort$triceps_m12)<- "Triceps Skinfold at Month 12 (mm)"
+label(whole_cohort$triceps_m18)<- "Triceps Skinfold at Month 18 (mm)"
+label(whole_cohort$subscapular_del)<- "Subscapular Skinfold at Delivery (RC) (mm)"
+label(whole_cohort$subscapular_wk1)<- "Subscapular Skinfold at Week 1 (mm)"
+label(whole_cohort$subscapular_wk3)<- "Subscapular  Skinfold at Week 3 (mm)"
+label(whole_cohort$subscapular_wk6)<- "Subscapular Skinfold at Week 6 (mm)"
+label(whole_cohort$subscapular_m3)<- "Subscapular Skinfold at Month 3 (mm)"
+label(whole_cohort$subscapular_m6)<- "Subscapular Skinfold at Month 6 (mm)"
+label(whole_cohort$subscapular_m12)<- "Subscapular Skinfold at  Month 12 (mm)"
+label(whole_cohort$subscapular_m18)<- "Subscapular Skinfold at Month 18 (mm)"
+label(whole_cohort$Days_since_birth_del)<- "Days Since Birth"
+label(whole_cohort$Days_since_birth_wk1)<- "Days Since Birth at Week 1"
+label(whole_cohort$Days_since_birth_wk3)<- "Days Since Birth at Week 3"
+label(whole_cohort$Days_since_birth_wk6)<- "Days Since Birth at Week 6"
+label(whole_cohort$Days_since_birth_m3)<- "Days Since Birth at Month 3"
+label(whole_cohort$Days_since_birth_m6)<- "Days Since Birth at Month 6"
+label(whole_cohort$Days_since_birth_m12)<- "Days Since Birth at Month 12"
+label(whole_cohort$Days_since_birth_m18)<- "Days Since Birth at Month 18"
+
+
+
+
+
+## only include blood_child sample
+blood_child<- whole_cohort %>% 
+              filter(child_participation==1)
+
+
+## remove some outliers
+blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10322, NA, blood_child$weight_m12)
+blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10406, NA, blood_child$weight_m12)
+blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10731, NA, blood_child$weight_m12)
+blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10442, NA, blood_child$weight_m12)
+blood_child$length_m12<- ifelse(blood_child$Subject_ID==10573, NA, blood_child$length_m12)
+
+
+```
+
+
+# Weight
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+weight_table<-  blood_child %>%
+              select(weight_del_CN,
+                     weight_del,
+                     weight_wk1,
+                     weight_wk3,
+                     weight_wk6,
+                     weight_m3,
+                     weight_m6,
+                     weight_m12,
+                     weight_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+weight_table
+```
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_weight<- blood_child %>% 
+                     select(starts_with("weight_"))
+
+
+vis_miss(blood_child_weight)
+gg_miss_var(blood_child_weight)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_weight_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("weight_"),
+                                  names_to = "weight_time",
+                                  names_prefix = "weight_",
+                                  values_to = "weight_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_weight_long$weight_time <- factor(blood_child_weight_long$weight_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_weight_long_visit <- blood_child_weight_long %>%
+  group_by(Subject_ID) %>%
+  arrange(weight_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_weight_plot1 <- blood_child_weight_long_visit %>% 
+                         ggplot(aes(x=weight_value, fill=weight_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(weight_time), scale="free",independent = "all") 
+               
+
+blood_weight_plot1
+
+
+blood_weight_plot2 <- blood_child_weight_long_visit %>% 
+                         ggplot(aes(y=weight_value, x=weight_time,fill=weight_time)) + 
+                         geom_boxplot()
+               
+
+blood_weight_plot2
+```
+
+
+
+
+# Length
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+length_table<-  blood_child %>%
+              select(length_del_CN,
+                     length_del,
+                     length_wk1,
+                     length_wk3,
+                     length_wk6,
+                     length_m3,
+                     length_m6,
+                     length_m12,
+                     length_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+length_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_length<- blood_child %>% 
+                     select(starts_with("length_"))
+
+
+vis_miss(blood_child_length)
+gg_miss_var(blood_child_length)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_length_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("length_"),
+                                  names_to = "length_time",
+                                  names_prefix = "length_",
+                                  values_to = "length_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_length_long$length_time <- factor(blood_child_length_long$length_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_length_long_visit <- blood_child_length_long %>%
+  group_by(Subject_ID) %>%
+  arrange(length_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_length_plot1 <- blood_child_length_long_visit %>% 
+                         ggplot(aes(x=length_value, fill=length_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(length_time), scale="free",independent = "all") 
+               
+
+blood_child_length_plot1
+
+
+blood_child_length_plot2 <- blood_child_length_long_visit %>% 
+                         ggplot(aes(y=length_value, x=length_time,fill=length_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_length_plot2
+```
+
+
+# Head
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+head_table<-  blood_child %>%
+              select(head_del_CN,
+                     head_del,
+                     head_wk1,
+                     head_wk3,
+                     head_wk6,
+                     head_m3,
+                     head_m6,
+                     head_m12,
+                     head_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+head_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_head<- blood_child %>% 
+                     select(starts_with("head_"))
+
+
+vis_miss(blood_child_head)
+gg_miss_var(blood_child_head)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_head_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("head_"),
+                                  names_to = "head_time",
+                                  names_prefix = "head_",
+                                  values_to = "head_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_head_long$head_time <- factor(blood_child_head_long$head_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_head_long_visit <- blood_child_head_long %>%
+  group_by(Subject_ID) %>%
+  arrange(head_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_head_plot1 <- blood_child_head_long_visit %>% 
+                         ggplot(aes(x=head_value, fill=head_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(head_time), scale="free",independent = "all") 
+               
+
+blood_child_head_plot1
+
+
+blood_child_head_plot2 <- blood_child_head_long_visit %>% 
+                         ggplot(aes(y=head_value, x=head_time,fill=head_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_head_plot2
+```
+
+
+# Abdominal
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+abdominal_table<-  blood_child %>%
+              select(abdominal_del,
+                     abdominal_wk1,
+                     abdominal_wk3,
+                     abdominal_wk6,
+                     abdominal_m3,
+                     abdominal_m6,
+                     abdominal_m12,
+                     abdominal_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+abdominal_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_abdominal<- blood_child %>% 
+                     select(starts_with("abdominal_"))
+
+
+vis_miss(blood_child_abdominal)
+gg_miss_var(blood_child_abdominal)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_abdominal_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("abdominal_"),
+                                  names_to = "abdominal_time",
+                                  names_prefix = "abdominal_",
+                                  values_to = "abdominal_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+blood_child_abdominal_long$abdominal_time <- factor(blood_child_abdominal_long$abdominal_time,
+                                        levels = c("del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_abdominal_long_visit <- blood_child_abdominal_long %>%
+  group_by(Subject_ID) %>%
+  arrange(abdominal_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_abdominal_plot1 <- blood_child_abdominal_long_visit %>% 
+                         ggplot(aes(x=abdominal_value, fill=abdominal_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(abdominal_time), scale="free",independent = "all") 
+               
+
+blood_child_abdominal_plot1
+
+
+blood_child_abdominal_plot2 <- blood_child_abdominal_long_visit %>% 
+                         ggplot(aes(y=abdominal_value, x=abdominal_time,fill=abdominal_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_abdominal_plot2
+```
+
+
+# Midarm
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+midarm_table<-  blood_child %>%
+              select(midarm_del,
+                     midarm_wk1,
+                     midarm_wk3,
+                     midarm_wk6,
+                     midarm_m3,
+                     midarm_m6,
+                     midarm_m12,
+                     midarm_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+midarm_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_midarm<- blood_child %>% 
+                     select(starts_with("midarm_"))
+
+
+vis_miss(blood_child_midarm)
+gg_miss_var(blood_child_midarm)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_midarm_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("midarm_"),
+                                  names_to = "midarm_time",
+                                  names_prefix = "midarm_",
+                                  values_to = "midarm_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+blood_child_midarm_long$midarm_time <- factor(blood_child_midarm_long$midarm_time,
+                                        levels = c("del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_midarm_long_visit <- blood_child_midarm_long %>%
+  group_by(Subject_ID) %>%
+  arrange(midarm_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_midarm_plot1 <- blood_child_midarm_long_visit %>% 
+                         ggplot(aes(x=midarm_value, fill=midarm_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(midarm_time), scale="free",independent = "all") 
+               
+
+blood_child_midarm_plot1
+
+
+blood_child_midarm_plot2 <- blood_child_midarm_long_visit %>% 
+                         ggplot(aes(y=midarm_value, x=midarm_time,fill=midarm_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_midarm_plot2
+```
+
+
+# Triceps
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+triceps_table<-  blood_child %>%
+              select(triceps_del,
+                     triceps_wk1,
+                     triceps_wk3,
+                     triceps_wk6,
+                     triceps_m3,
+                     triceps_m6,
+                     triceps_m12,
+                     triceps_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+triceps_table
+```
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_triceps<- blood_child %>% 
+                     select(starts_with("triceps_"))
+
+
+vis_miss(blood_child_triceps)
+gg_miss_var(blood_child_triceps)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_triceps_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("triceps_"),
+                                  names_to = "triceps_time",
+                                  names_prefix = "triceps_",
+                                  values_to = "triceps_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+blood_child_triceps_long$triceps_time <- factor(blood_child_triceps_long$triceps_time,
+                                        levels = c("del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_triceps_long_visit <- blood_child_triceps_long %>%
+  group_by(Subject_ID) %>%
+  arrange(triceps_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_triceps_plot1 <- blood_child_triceps_long_visit %>% 
+                         ggplot(aes(x=triceps_value, fill=triceps_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(triceps_time), scale="free",independent = "all") 
+               
+
+blood_child_triceps_plot1
+
+
+blood_child_triceps_plot2 <- blood_child_triceps_long_visit %>% 
+                         ggplot(aes(y=triceps_value, x=triceps_time,fill=triceps_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_triceps_plot2
+```
+
+
+# Subscapular
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+subscapular_table<-  blood_child %>%
+              select(subscapular_del,
+                     subscapular_wk1,
+                     subscapular_wk3,
+                     subscapular_wk6,
+                     subscapular_m3,
+                     subscapular_m6,
+                     subscapular_m12,
+                     subscapular_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+subscapular_table
+```
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_subscapular<- blood_child %>% 
+                          select(starts_with("subscapular_"))
+
+
+vis_miss(blood_child_subscapular)
+gg_miss_var(blood_child_subscapular)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_subscapular_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("subscapular_"),
+                                  names_to = "subscapular_time",
+                                  names_prefix = "subscapular_",
+                                  values_to = "subscapular_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+blood_child_subscapular_long$subscapular_time <- factor(blood_child_subscapular_long$subscapular_time,
+                                        levels = c("del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_subscapular_long_visit <- blood_child_subscapular_long %>%
+  group_by(Subject_ID) %>%
+  arrange(subscapular_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_subscapular_plot1 <- blood_child_subscapular_long_visit %>% 
+                         ggplot(aes(x=subscapular_value, fill=subscapular_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(subscapular_time), scale="free",independent = "all") 
+               
+
+blood_child_subscapular_plot1
+
+
+blood_child_subscapular_plot2 <- blood_child_subscapular_long_visit %>% 
+                         ggplot(aes(y=subscapular_value, x=subscapular_time,fill=subscapular_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_subscapular_plot2
+```
+
+
+# Anogenital
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+anogenital_table<-  blood_child %>%
+              select(anogenital_M3_finalavg,
+                     anogenital_M12_finalavg,
+                     anogenital_delv_finalavg)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+anogenital_table
+```
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_anogenital<- blood_child %>% 
+                          select(starts_with("anogenital_"))
+
+
+vis_miss(blood_child_anogenital)
+gg_miss_var(blood_child_anogenital)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_anogenital_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("anogenital_"),
+                                  names_to = "anogenital_time",
+                                  names_prefix = "anogenital_",
+                                  values_to = "anogenital_value",
+                                  values_drop_na = FALSE
+                                  )
+
+blood_child_anogenital_long$anogenital_time <- factor(blood_child_anogenital_long$anogenital_time,
+                                                 levels = c("delv_finalavg", "M3_finalavg", "M12_finalavg"))
+
+## assign visit variable
+blood_child_anogenital_long_visit <- blood_child_anogenital_long %>%
+  group_by(Subject_ID) %>%
+  arrange(anogenital_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_anogenital_plot1 <- blood_child_anogenital_long_visit %>% 
+                         ggplot(aes(x=anogenital_value, fill=anogenital_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(anogenital_time), scale="free",independent = "all") 
+               
+
+blood_child_anogenital_plot1
+
+
+blood_child_anogenital_plot2 <- blood_child_anogenital_long_visit %>% 
+                         ggplot(aes(y=anogenital_value, x=anogenital_time,fill=anogenital_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_anogenital_plot2
+```
+
+
+# Days since birth
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+Days_table<-  blood_child %>%
+              select(Days_since_birth_del,
+                     Days_since_birth_wk1,
+                     Days_since_birth_wk3,
+                     Days_since_birth_wk6,
+                     Days_since_birth_m3,
+                     Days_since_birth_m6,
+                     Days_since_birth_m12,
+                     Days_since_birth_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+Days_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_Days<- blood_child %>% 
+                     select(starts_with("Days_since_birth_"))
+
+
+vis_miss(blood_child_Days)
+gg_miss_var(blood_child_Days)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_Days_long <- blood_child %>% 
+                          pivot_longer(
+                                  cols = starts_with("Days_since_birth_"),
+                                  names_to = "Days_since_birth_time",
+                                  names_prefix = "Days_since_birth_",
+                                  values_to = "Days_since_birth_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+blood_child_Days_long$Days_since_birth_time <- factor(blood_child_Days_long$Days_since_birth_time,
+                                        levels = c("del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_Days_long_visit <- blood_child_Days_long %>%
+  group_by(Subject_ID) %>%
+  arrange(Days_since_birth_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_Days_plot1 <- blood_child_Days_long_visit %>% 
+                         ggplot(aes(x=Days_since_birth_value, fill=Days_since_birth_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(Days_since_birth_time), scale="free",independent = "all") 
+               
+
+blood_child_Days_plot1
+
+
+blood_child_Days_plot2 <- blood_child_Days_long_visit %>% 
+                         ggplot(aes(y=Days_since_birth_value, x=Days_since_birth_time,fill=Days_since_birth_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_Days_plot2
+```
+
+
