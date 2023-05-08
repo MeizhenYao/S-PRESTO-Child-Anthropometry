@@ -222,8 +222,8 @@ blood_child<- whole_cohort %>%
 # blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10731, NA, blood_child$weight_m12)
 # blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10442, NA, blood_child$weight_m12)
 # blood_child$length_m12<- ifelse(blood_child$Subject_ID==10573, NA, blood_child$length_m12)
-nomissing<- blood_child[complete.cases(blood_child[, c('weight_del_CN', 'weight_del')]), ]
-cor(nomissing$weight_del_CN, nomissing$weight_del)
+# nomissing<- blood_child[complete.cases(blood_child[, c('weight_del_CN', 'weight_del')]), ]
+# cor(nomissing$weight_del_CN, nomissing$weight_del)
 ```
 
 
