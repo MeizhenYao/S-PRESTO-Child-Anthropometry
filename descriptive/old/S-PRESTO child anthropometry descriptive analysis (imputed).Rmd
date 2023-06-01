@@ -1,0 +1,730 @@
+---
+title: "S-PRESTO child anthropometry descriptive analysis (imputed)"
+author: "Meizhen Yao"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    df_print: paged
+    fig_caption: yes
+    fig_height: 7
+    fig_width: 10
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    self_contained: yes
+    code_folding: hide
+    toc_depth: 6
+header-includes: \usepackage{multirow}
+---
+
+<style type="text/css">
+body{
+  /*font-family: Helvetica;*/
+  font-size: 12pt;
+}
+</style>
+
+```{r setup, include=FALSE}
+options(digits = 4)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,cache=F,warning = FALSE)
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(qwraps2_markup = "markdown")
+
+```
+
+
+```{r,message=FALSE,warning=FALSE,include=FALSE}
+library(clubSandwich)
+library(WeightIt)
+library(ResourceSelection)
+library(parameters)
+library(sjstats)
+library(rms)
+library(survminer)
+library(survival)
+library(broom)
+library("data.table")   
+library(gtsummary)
+library(gt)
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(gridExtra)
+library(readxl)
+library(sandwich)
+library(boot)
+library(table1)
+library(flextable)
+library(plyr)
+library(Rcpp)
+library(modelr)
+library(lme4)
+library(nlme)
+library(readr)
+library(gWQS)
+library(broom.mixed)
+library(yaml)
+library(rmarkdown)
+library(officer)
+library(scales)
+library(ipw)
+library(spatstat)
+library(survey)
+library(MatchIt)
+library(devtools)
+library(cobalt)
+# install_version("optmatch", version = "0.9.17", repos = "http://cran.us.r-project.org")
+# install_github("markmfredrickson/RItools")
+library(RItools)
+library(optmatch)
+library(mice)
+library(gtsummary)
+library(tidyr)
+library(tidyverse)
+library(grid)
+library(gtable)
+library(ggh4x)
+library(naniar)
+library(UpSetR)
+
+#-------------------------------------------------------import data set
+blood_child_who_stan<- read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_who_stan_04172023.csv")
+
+
+ 
+
+
+label(blood_child_who_stan$weight_del_CN)<- "Weight at Delivery (from hospital Casenotes) (g)"
+label(blood_child_who_stan$weight_del)<- "Weight  at Delivery (from RC) (g)"
+label(blood_child_who_stan$weight_wk1)<- "Weight at Week 1 (g)"
+label(blood_child_who_stan$weight_wk3)<- "Weight at Week 3 (g)"
+label(blood_child_who_stan$weight_wk6)<- "Weight at Week 6 (g)"
+label(blood_child_who_stan$weight_m3)<- "Weight  at Week at Month 3 (g)" 
+label(blood_child_who_stan$weight_m6)<- "Weight  at Week at Month 6 (g)"
+label(blood_child_who_stan$weight_m12)<- "Weight  at Week at Month 12 (g)"
+label(blood_child_who_stan$weight_m18)<- "Weight  at Week at Month 18 (g)"
+label(blood_child_who_stan$length_del_CN)<- "Length at Delivery (from Casenotes) (cm)"
+label(blood_child_who_stan$length_del)<- "Length at Delivery (from RC) (cm)"
+label(blood_child_who_stan$length_wk1)<- "Length at Week 1 (cm)"
+label(blood_child_who_stan$length_wk3)<- "Length at Week 3 (cm)"
+label(blood_child_who_stan$length_wk6)<- "Length at Week 6 (cm)"
+label(blood_child_who_stan$length_m3)<- "Length at Month 3 (cm)"
+label(blood_child_who_stan$length_m6)<- "Length at Month 6 (cm)"
+label(blood_child_who_stan$length_m12)<- "Length at Month 12 (cm)"
+label(blood_child_who_stan$length_m18)<- "Length at Month 18 (cm)"
+label(blood_child_who_stan$Days_since_birth_del)<- "Days Since Birth"
+label(blood_child_who_stan$Days_since_birth_wk1)<- "Days Since Birth at Week 1"
+label(blood_child_who_stan$Days_since_birth_wk3)<- "Days Since Birth at Week 3"
+label(blood_child_who_stan$Days_since_birth_wk6)<- "Days Since Birth at Week 6"
+label(blood_child_who_stan$Days_since_birth_m3)<- "Days Since Birth at Month 3"
+label(blood_child_who_stan$Days_since_birth_m6)<- "Days Since Birth at Month 6"
+label(blood_child_who_stan$Days_since_birth_m12)<- "Days Since Birth at Month 12"
+label(blood_child_who_stan$Days_since_birth_m18)<- "Days Since Birth at Month 18"
+
+
+
+
+
+
+
+# ## remove some outliers
+# blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10322, NA, blood_child$weight_m12)
+# blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10406, NA, blood_child$weight_m12)
+# blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10731, NA, blood_child$weight_m12)
+# blood_child$weight_m12<- ifelse(blood_child$Subject_ID==10442, NA, blood_child$weight_m12)
+# blood_child$length_m12<- ifelse(blood_child$Subject_ID==10573, NA, blood_child$length_m12)
+# nomissing<- blood_child[complete.cases(blood_child[, c('weight_del_CN', 'weight_del')]), ]
+# cor(nomissing$weight_del_CN, nomissing$weight_del)
+```
+
+
+# Weight
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+weight_table<-  blood_child_who_stan %>%
+              select(weight_del_CN,
+                     weight_del,
+                     weight_wk1,
+                     weight_wk3,
+                     weight_wk6,
+                     weight_m3,
+                     weight_m6,
+                     weight_m12,
+                     weight_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+weight_table
+```
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_weight<- blood_child_who_stan %>% 
+                     select(starts_with("weight_"))
+
+
+vis_miss(blood_child_weight)
+gg_miss_var(blood_child_weight)
+
+```
+
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_weight_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("weight_"),
+                                  names_to = "weight_time",
+                                  names_prefix = "weight_",
+                                  values_to = "weight_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_weight_long$weight_time <- factor(blood_child_weight_long$weight_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_weight_long_visit <- blood_child_weight_long %>%
+  group_by(Subject_ID) %>%
+  arrange(weight_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_weight_plot1 <- blood_child_weight_long_visit %>% 
+                         ggplot(aes(x=weight_value, fill=weight_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(weight_time), scale="free",independent = "all") 
+               
+
+blood_weight_plot1
+
+
+blood_weight_plot2 <- blood_child_weight_long_visit %>% 
+                         ggplot(aes(y=weight_value, x=weight_time,fill=weight_time)) + 
+                         geom_boxplot()
+               
+
+blood_weight_plot2
+```
+
+
+
+
+# Length
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+length_table<-  blood_child_who_stan %>%
+              select(length_del_CN,
+                     length_del,
+                     length_wk1,
+                     length_wk3,
+                     length_wk6,
+                     length_m3,
+                     length_m6,
+                     length_m12,
+                     length_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+length_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_length<- blood_child_who_stan %>% 
+                     select(starts_with("length_"))
+
+
+vis_miss(blood_child_length)
+gg_miss_var(blood_child_length)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_length_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("length_"),
+                                  names_to = "length_time",
+                                  names_prefix = "length_",
+                                  values_to = "length_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_length_long$length_time <- factor(blood_child_length_long$length_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_length_long_visit <- blood_child_length_long %>%
+  group_by(Subject_ID) %>%
+  arrange(length_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_length_plot1 <- blood_child_length_long_visit %>% 
+                         ggplot(aes(x=length_value, fill=length_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(length_time), scale="free",independent = "all") 
+               
+
+blood_child_length_plot1
+
+
+blood_child_length_plot2 <- blood_child_length_long_visit %>% 
+                         ggplot(aes(y=length_value, x=length_time,fill=length_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_length_plot2
+```
+
+
+
+
+
+# zweight
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+zweight_table<-  blood_child_who_stan %>%
+              select(zweight_del_CN,
+                     zweight_del,
+                     zweight_wk1,
+                     zweight_wk3,
+                     zweight_wk6,
+                     zweight_m3,
+                     zweight_m6,
+                     zweight_m12,
+                     zweight_m18)%>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+zweight_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_zweight<- blood_child_who_stan %>% 
+                     select(starts_with("zweight_"))
+
+
+vis_miss(blood_child_zweight)
+gg_miss_var(blood_child_zweight)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_zweight_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("zweight_"),
+                                  names_to = "zweight_time",
+                                  names_prefix = "zweight_",
+                                  values_to = "zweight_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_zweight_long$zweight_time <- factor(blood_child_zweight_long$zweight_time,
+                                        levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_zweight_long_visit <- blood_child_zweight_long %>%
+  group_by(Subject_ID) %>%
+  arrange(zweight_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_zweight_plot1 <- blood_child_zweight_long_visit %>% 
+                         ggplot(aes(x=zweight_value, fill=zweight_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(zweight_time), scale="free",independent = "all") 
+               
+
+blood_child_zweight_plot1
+
+
+blood_child_zweight_plot2 <- blood_child_zweight_long_visit %>% 
+                         ggplot(aes(y=zweight_value, x=zweight_time,fill=zweight_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_zweight_plot2
+```
+
+# zlength
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+zlength_table<-  blood_child_who_stan %>%
+              select(zlength_del_CN,
+                     zlength_del,
+                     zlength_wk1,
+                     zlength_wk3,
+                     zlength_wk6,
+                     zlength_m3,
+                     zlength_m6,
+                     zlength_m12,
+                     zlength_m18) %>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+zlength_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_zlength<- blood_child_who_stan %>% 
+                     select(starts_with("zlength_"))
+
+
+vis_miss(blood_child_zlength)
+gg_miss_var(blood_child_zlength)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_zlength_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("zlength_"),
+                                  names_to = "zlength_time",
+                                  names_prefix = "zlength_",
+                                  values_to = "zlength_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_zlength_long$zlength_time <- factor(blood_child_zlength_long$zlength_time,
+                                                levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_zlength_long_visit <- blood_child_zlength_long %>%
+  group_by(Subject_ID) %>%
+  arrange(zlength_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_zlength_plot1 <- blood_child_zlength_long_visit %>% 
+                         ggplot(aes(x=zlength_value, fill=zlength_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(zlength_time), scale="free",independent = "all") 
+               
+
+blood_child_zlength_plot1
+
+
+blood_child_zlength_plot2 <- blood_child_zlength_long_visit %>% 
+                         ggplot(aes(y=zlength_value, x=zlength_time,fill=zlength_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_zlength_plot2
+```
+
+# zbmi
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+zbmi_table<-  blood_child_who_stan %>%
+              select(zbmi_del_CN,
+                     zbmi_del,
+                     zbmi_wk1,
+                     zbmi_wk3,
+                     zbmi_wk6,
+                     zbmi_m3,
+                     zbmi_m6,
+                     zbmi_m12,
+                     zbmi_m18) %>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+zbmi_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_zbmi<- blood_child_who_stan %>% 
+                     select(starts_with("zbmi_"))
+
+
+vis_miss(blood_child_zbmi)
+gg_miss_var(blood_child_zbmi)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_zbmi_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("zbmi_"),
+                                  names_to = "zbmi_time",
+                                  names_prefix = "zbmi_",
+                                  values_to = "zbmi_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_zbmi_long$zbmi_time <- factor(blood_child_zbmi_long$zbmi_time,
+                                                levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_zbmi_long_visit <- blood_child_zbmi_long %>%
+  group_by(Subject_ID) %>%
+  arrange(zbmi_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_zbmi_plot1 <- blood_child_zbmi_long_visit %>% 
+                         ggplot(aes(x=zbmi_value, fill=zbmi_time)) + 
+                         geom_histogram()+
+                         facet_grid2(cols=vars(zbmi_time), scale="free",independent = "all") 
+               
+
+blood_child_zbmi_plot1
+
+
+blood_child_zbmi_plot2 <- blood_child_zbmi_long_visit %>% 
+                         ggplot(aes(y=zbmi_value, x=zbmi_time,fill=zbmi_time)) + 
+                         geom_boxplot()
+               
+
+blood_child_zbmi_plot2
+```
+
+
+# zwfl WHO
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+zwfl_table<-  blood_child_who_stan %>%
+              select(zwfl_WHO_del_CN,
+                     zwfl_WHO_del,
+                     zwfl_WHO_wk1,
+                     zwfl_WHO_wk3,
+                     zwfl_WHO_wk6,
+                     zwfl_WHO_m3,
+                     zwfl_WHO_m6,
+                     zwfl_WHO_m12,
+                     zwfl_WHO_m18) %>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+zwfl_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_zwfl<- blood_child_who_stan %>% 
+                     select(starts_with("zwfl_WHO"))
+
+
+vis_miss(blood_child_zwfl)
+gg_miss_var(blood_child_zwfl)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_zwfl_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("zwfl_WHO_"),
+                                  names_to = "zwfl_WHO_time",
+                                  names_prefix = "zwfl_WHO_",
+                                  values_to = "zwfl_WHO_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_zwfl_long$zwfl_WHO_time <- factor(blood_child_zwfl_long$zwfl_WHO_time,
+                                          levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_zwfl_long_visit <- blood_child_zwfl_long %>%
+  group_by(Subject_ID) %>%
+  arrange(zwfl_WHO_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_zwfl_plot1 <- blood_child_zwfl_long_visit %>% 
+                          ggplot(aes(x=zwfl_WHO_value, fill=zwfl_WHO_time)) + 
+                          geom_histogram()+
+                          facet_grid2(cols=vars(zwfl_WHO_time), scale="free",independent = "all") 
+               
+
+blood_child_zwfl_plot1
+
+
+blood_child_zwfl_plot2 <- blood_child_zwfl_long_visit %>% 
+                          ggplot(aes(y=zwfl_WHO_value, x=zwfl_WHO_time,fill=zwfl_WHO_time)) + 
+                          geom_boxplot()
+               
+
+blood_child_zwfl_plot2
+
+```
+
+
+# zwfl internal
+## summary statistics
+```{r, warning=FALSE, message=FALSE}
+zwfl_table<-  blood_child_who_stan %>%
+              select(zwfl_internal_del_CN,
+                     zwfl_internal_del,
+                     zwfl_internal_wk1,
+                     zwfl_internal_wk3,
+                     zwfl_internal_wk6,
+                     zwfl_internal_m3,
+                     zwfl_internal_m6,
+                     zwfl_internal_m12,
+                     zwfl_internal_m18) %>% 
+              tbl_summary(
+                type=list(everything()~"continuous"),
+                missing_text = "Missing"
+              ) %>% 
+              bold_labels()
+
+zwfl_table
+```
+
+
+
+## missing visualization
+```{r, warning=FALSE, message=FALSE}
+
+blood_child_zwfl<- blood_child_who_stan %>% 
+                     select(starts_with("zwfl_internal"))
+
+
+vis_miss(blood_child_zwfl)
+gg_miss_var(blood_child_zwfl)
+
+```
+
+## boxplot
+```{r, warning=FALSE, message=FALSE}
+# data preparation
+## convert to long format
+blood_child_zwfl_long <- blood_child_who_stan %>% 
+                          pivot_longer(
+                                  cols = starts_with("zwfl_internal_"),
+                                  names_to = "zwfl_internal_time",
+                                  names_prefix = "zwfl_internal_",
+                                  values_to = "zwfl_internal_value",
+                                  values_drop_na = FALSE
+                                  ) 
+
+
+blood_child_zwfl_long$zwfl_internal_time <- factor(blood_child_zwfl_long$zwfl_internal_time,
+                                          levels = c("del_CN", "del", "wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+
+## assign visit variable
+blood_child_zwfl_long_visit <- blood_child_zwfl_long %>%
+  group_by(Subject_ID) %>%
+  arrange(zwfl_internal_time) %>%
+  dplyr::mutate(visit=1:n()) %>%
+  arrange(Subject_ID)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+blood_child_zwfl_plot1 <- blood_child_zwfl_long_visit %>% 
+                          ggplot(aes(x=zwfl_internal_value, fill=zwfl_internal_time)) + 
+                          geom_histogram()+
+                          facet_grid2(cols=vars(zwfl_internal_time), scale="free",independent = "all") 
+               
+
+blood_child_zwfl_plot1
+
+
+blood_child_zwfl_plot2 <- blood_child_zwfl_long_visit %>% 
+                          ggplot(aes(y=zwfl_internal_value, x=zwfl_internal_time,fill=zwfl_internal_time)) + 
+                          geom_boxplot()
+               
+
+blood_child_zwfl_plot2
+
+```
+
