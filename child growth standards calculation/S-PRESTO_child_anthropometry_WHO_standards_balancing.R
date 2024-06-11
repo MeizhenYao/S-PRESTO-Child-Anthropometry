@@ -1,0 +1,451 @@
+###############################################
+###############################################
+### generating child growth standard scores ###
+###############################################
+###############################################
+
+library(data.table)  
+library(tidyverse)
+library(readxl)
+library(readr)
+library(mice)
+library(anthro)
+library(writexl)
+library(ggh4x)
+library(naniar)
+library(UpSetR)
+library(optmatch)
+library(MatchIt)
+library(cobalt)
+
+#-------------------------------------------------------import data set
+whole_cohort<-  read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/for paper/whole_cohort_20230316.csv")
+whole_cohort<- read_csv("~/Projects/S-PRESTO/input/chemical & maternal/whole_cohort.csv")
+sum(!is.na(whole_cohort2$PFHxS_quar_num))
+
+
+#-------------------------------------------------------data preparation
+
+
+## Restricted to participants with a blood sample and a live birth
+blood<- whole_cohort %>% 
+  filter(participation==1 & live_birth_recat==1)
+
+## remove some outliers
+blood$weight_m12<- ifelse(blood$Subject_ID==10322, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10406, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10731, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10442, NA, blood$weight_m12)
+blood$length_m12<- ifelse(blood$Subject_ID==10573, NA, blood$length_m12)
+
+## add days_since_birth_del_CN variable
+blood$Days_since_birth_del_CN<- rep(0, 328)
+
+
+blood$Days_since_birth_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$Days_since_birth_del)
+blood$weight_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$weight_del)
+blood$length_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$length_del)
+
+## merge variables at delivery
+del<- blood[, c('weight_del', 'length_del', 'Days_since_birth_del')]
+
+blood<- blood %>%
+  mutate(weight_del_merge = coalesce(weight_del, weight_del_CN),
+         length_del_merge = coalesce(length_del, length_del_CN),
+         Days_since_birth_del_merge = if_else(is.na(weight_del) == TRUE, 0, Days_since_birth_del))
+
+
+merge<- blood[, c('weight_del_merge', 'length_del_merge', 'Days_since_birth_del_merge')]
+
+
+
+
+## only include child anthropometry variables
+weight<- c('weight_del_merge','weight_wk3','weight_wk6','weight_m3','weight_m6','weight_m12','weight_m18')
+length<- c('length_del_merge','length_wk3','length_wk6','length_m3','length_m6','length_m12','length_m18')
+child_age<- c('Days_since_birth_del_merge','Days_since_birth_wk3','Days_since_birth_wk6','Days_since_birth_m3','Days_since_birth_m6','Days_since_birth_m12','Days_since_birth_m18')
+
+
+blood_child<- blood[,c("Subject_ID", "bw_sex", "bw_birth_GA", weight, length, child_age,
+                       "Analysis_Batch_recat", 'age_at_recruitment', 'pcv1_highest_education_completed_recat','ethnicity_specified_recat','pcv1_parity_recat','pcv1_bmi',"pcv1_smoker",
+                       "PFHpA_bi_num", "PFDA_bi_num", "PFHpS_bi_num", "PFHxS", "PFOS_Total", "PFOA_Linear", "PFNA")]
+
+vis_miss(blood_child)
+vis_miss(blood_child,sort_miss = TRUE)
+gg_miss_var(blood_child)
+
+## restrict to participants completed delivery visit and month 18 visit
+blood_child_del_m18<- blood_child[complete.cases(blood_child[,c('weight_del_merge', "length_del_merge", "Days_since_birth_del_merge", "weight_m18", "length_m18", "Days_since_birth_m18")]),]
+
+
+############################
+############################
+####### Imputation #########
+############################
+############################
+
+
+
+#------------------------------------------------------- imputation
+###------------------------------------------------------------------------------ weights & length & bw_sex & GA& other covariates
+
+blood_child_del_m18_weight_length<- blood_child_del_m18[,c(weight, length, "age_at_recruitment", "bw_sex", "bw_birth_GA", "pcv1_bmi")]
+apply(blood_child_del_m18_weight_length, 2, function(x) sum(is.na(x))) 
+md.pattern(blood_child_del_m18_weight_length)
+#### Initialize the Imputation
+init = mice(blood_child_del_m18_weight_length, maxit=0) 
+meth = init$method
+predM = init$predictorMatrix
+
+
+
+####  Specify a method to be used for imputation for some selected variables 
+#####   used Random Forest(rf) for selected variables, and blank for other variables
+meth[c("age_at_recruitment", "bw_sex", "bw_birth_GA", "pcv1_bmi")] = ""
+
+meth[c(weight, length)] = "rf"
+
+
+####   Now Run your Main Imputation using "Random Forest"
+#####   m = 8 creates 8 different imputed datasets 
+set.seed(951263)
+blood_child_del_m18_weight_length_imputing = mice(blood_child_del_m18_weight_length, method=meth, predictorMatrix=predM, m=8, ntree = 50)
+#####    Use the last completed data set 
+blood_child_del_m18_weight_length_imputed <- complete(blood_child_del_m18_weight_length_imputing, action=8)
+
+
+####    Check if you actually imputed all the variables you wanted to impute
+sapply(blood_child_del_m18_weight_length_imputed, function(x) sum(is.na(x)))
+
+
+
+
+###------------------------------------------------------------------------------ child age & bw_sex & GA & other covariates
+blood_child_del_m18_age<- blood_child_del_m18[,c(child_age, "bw_sex", "bw_birth_GA", "pcv1_bmi")]
+apply(blood_child_del_m18_age, 2, function(x) sum(is.na(x))) 
+md.pattern(blood_child_del_m18_age)
+#### Initialize the Imputation
+init = mice(blood_child_del_m18_age, maxit=0) 
+meth = init$method
+predM = init$predictorMatrix
+
+
+
+####  Specify a method to be used for imputation for some selected variables 
+#####   used Random Forest(rf) for selected variables, and blank for other variables
+meth[c("bw_sex", "bw_birth_GA", "pcv1_bmi")] = ""
+
+meth[c(child_age)] = "rf"
+
+
+####   Now Run your Main Imputation using "Random Forest"
+#####   m = 8 creates 8 different imputed datasets 
+set.seed(651285)
+blood_child_del_m18_age_imputing = mice(blood_child_del_m18_age, method=meth, predictorMatrix=predM, m=8, ntree = 50)
+#####    Use the last completed data set 
+blood_child_del_m18_age_imputed <- complete(blood_child_del_m18_age_imputing, action=8)
+
+
+####    Check if you actually imputed all the variables you wanted to impute
+sapply(blood_child_del_m18_age_imputed, function(x) sum(is.na(x)))
+
+
+
+blood_child_del_m18_imputed<- data.frame(blood_child_del_m18[, c("Subject_ID", "bw_sex")],
+                                         blood_child_del_m18_weight_length_imputed[, c(weight, length)],
+                                         blood_child_del_m18_age_imputed[, c(child_age)]) %>% 
+                              mutate(measure="L")
+
+
+
+############################
+############################
+####### WHO standards ######
+############################
+############################
+
+## delivery (merge hospital records & delivery visit)
+blood_child_who_stan_del_merge<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_del_merge, 
+                 weight = weight_del_merge/1000, 
+                 lenhei = length_del_merge,
+                 measure = measure)
+)[,c("zwei", "zlen", "zbmi", "zwfl")] 
+
+names(blood_child_who_stan_del_merge)<- c("zweight_del_merge", "zlength_del_merge", "zbmi_del_merge", "zwfl_WHO_del_merge")
+
+
+
+## at wk3
+blood_child_who_stan_wk3<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_wk3, 
+                 weight = weight_wk3/1000, 
+                 lenhei = length_wk3,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+names(blood_child_who_stan_wk3)<- c("zweight_wk3", "zlength_wk3", "zbmi_wk3", "zwfl_WHO_wk3")
+
+## at wk6
+blood_child_who_stan_wk6<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_wk6, 
+                 weight = weight_wk6/1000, 
+                 lenhei = length_wk6,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+names(blood_child_who_stan_wk6)<- c("zweight_wk6", "zlength_wk6", "zbmi_wk6", "zwfl_WHO_wk6")
+
+## at m3
+blood_child_who_stan_m3<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_m3, 
+                 weight = weight_m3/1000, 
+                 lenhei = length_m3,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+names(blood_child_who_stan_m3)<- c("zweight_m3", "zlength_m3", "zbmi_m3", "zwfl_WHO_m3")
+
+## at m6
+blood_child_who_stan_m6<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_m6, 
+                 weight = weight_m6/1000, 
+                 lenhei = length_m6,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+names(blood_child_who_stan_m6)<- c("zweight_m6", "zlength_m6", "zbmi_m6", "zwfl_WHO_m6")
+
+## at m12
+blood_child_who_stan_m12<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_m12, 
+                 weight = weight_m12/1000, 
+                 lenhei = length_m12,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+
+names(blood_child_who_stan_m12)<- c("zweight_m12", "zlength_m12", "zbmi_m12", "zwfl_WHO_m12")
+
+## at m18
+blood_child_who_stan_m18<- with(
+  blood_child_del_m18_imputed,
+  anthro_zscores(sex = bw_sex, 
+                 age = Days_since_birth_m18, 
+                 weight = weight_m18/1000, 
+                 lenhei = length_m18,
+                 measure = "L")
+)[,c("zwei", "zlen", "zbmi", "zwfl")]
+
+names(blood_child_who_stan_m18)<- c("zweight_m18", "zlength_m18", "zbmi_m18", "zwfl_WHO_m18")
+
+# Internal z-scores for weight-to-height ratio
+wfl_internal_zscores<- blood_child_del_m18_imputed %>% 
+  transmute(zwfl_internal_del_merge = (weight_del_merge/(1000*length_del_merge) - mean(weight_del_merge/(1000*length_del_merge)))/sd(weight_del_merge/(1000*length_del_merge)),
+            zwfl_internal_wk3 = (weight_wk3/(1000*length_wk3) - mean(weight_wk3/(1000*length_wk3)))/sd(weight_wk3/(1000*length_wk3)),
+            zwfl_internal_wk6 = (weight_wk6/(1000*length_wk6) - mean(weight_wk6/(1000*length_wk6)))/sd(weight_wk6/(1000*length_wk6)),
+            zwfl_internal_m3 = (weight_m3/(1000*length_m3) - mean(weight_m3/(1000*length_m3)))/sd(weight_m3/(1000*length_m3)),
+            zwfl_internal_m6 = (weight_m6/(1000*length_m6) - mean(weight_m6/(1000*length_m6)))/sd(weight_m6/(1000*length_m6)),
+            zwfl_internal_m12 = (weight_m12/(1000*length_m12) - mean(weight_m12/(1000*length_m12)))/sd(weight_m12/(1000*length_m12)),
+            zwfl_internal_m18 = (weight_m18/(1000*length_m18) - mean(weight_m18/(1000*length_m18)))/sd(weight_m18/(1000*length_m18)))
+
+## combine all datasets and add 
+blood_child_who_stan<- data.frame(blood_child_del_m18[,c("Subject_ID", 
+                                                         'age_at_recruitment', 'pcv1_bmi',
+                                                         "bw_sex", "bw_birth_GA","PFHpA_bi_num", "PFDA_bi_num", "PFHpS_bi_num", "PFHxS", "PFOS_Total", "PFOA_Linear", "PFNA")],
+                                  blood_child_del_m18_imputed[,c(weight, length, child_age)],
+                                  blood_child_who_stan_del_merge,
+                                  blood_child_who_stan_wk3,
+                                  blood_child_who_stan_wk6,
+                                  blood_child_who_stan_m3,
+                                  blood_child_who_stan_m6,
+                                  blood_child_who_stan_m12,
+                                  blood_child_who_stan_m18,
+                                  wfl_internal_zscores)
+
+
+###################################
+###################################
+####### covariates balancing ######
+###################################
+###################################
+
+blood_child_who_stan$PFHxS_bi_num<- blood_child_who_stan$PFHxS
+PFHxS_median <- quantile(blood_child_who_stan$PFHxS, c(1/2),na.rm=TRUE)
+for(i in 1:nrow(blood_child_who_stan)){
+  if ( blood_child_who_stan$PFHxS[i]<PFHxS_median){blood_child_who_stan$PFHxS_bi_num[i]<-0}
+  else if (blood_child_who_stan$PFHxS[i]>=PFHxS_median){blood_child_who_stan$PFHxS_bi_num[i]<-1}
+}
+
+blood_child_who_stan$PFOS_Total_bi_num<- blood_child_who_stan$PFOS_Total
+PFOS_Total_median <- quantile(blood_child_who_stan$PFOS_Total, c(1/2),na.rm=TRUE)
+for(i in 1:nrow(blood_child_who_stan)){
+  if ( blood_child_who_stan$PFOS_Total[i]<PFOS_Total_median){blood_child_who_stan$PFOS_Total_bi_num[i]<-0}
+  else if (blood_child_who_stan$PFOS_Total[i]>=PFOS_Total_median){blood_child_who_stan$PFOS_Total_bi_num[i]<-1}
+}
+
+blood_child_who_stan$PFOA_Linear_bi_num<- blood_child_who_stan$PFOA_Linear
+PFOA_Linear_median <- quantile(blood_child_who_stan$PFOA_Linear, c(1/2),na.rm=TRUE)
+for(i in 1:nrow(blood_child_who_stan)){
+  if ( blood_child_who_stan$PFOA_Linear[i]<PFOA_Linear_median){blood_child_who_stan$PFOA_Linear_bi_num[i]<-0}
+  else if (blood_child_who_stan$PFOA_Linear[i]>=PFOA_Linear_median){blood_child_who_stan$PFOA_Linear_bi_num[i]<-1}
+}
+
+blood_child_who_stan$PFNA_bi_num<- blood_child_who_stan$PFNA
+PFNA_median <- quantile(blood_child_who_stan$PFNA, c(1/2),na.rm=TRUE)
+for(i in 1:nrow(blood_child_who_stan)){
+  if ( blood_child_who_stan$PFNA[i]<PFNA_median){blood_child_who_stan$PFNA_bi_num[i]<-0}
+  else if (blood_child_who_stan$PFNA[i]>=PFNA_median){blood_child_who_stan$PFNA_bi_num[i]<-1}
+}
+
+
+
+## PFOS
+m_out_pfos <- matchit(PFOS_Total_bi_num ~ age_at_recruitment + pcv1_bmi,
+                      data = blood_child_who_stan, discard = "both", method = "full", 
+                      distance = "glm", caliper = 0.5)
+
+summary(m_out_pfos)
+bal.tab(m_out_pfos)
+f <- love.plot(m_out_pfos)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfos_data <- match.data(m_out_pfos) %>% 
+                   select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+                          -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+                          -distance, -weights, -subclass)
+
+## PFOA
+m_out_pfoa <- matchit(PFOA_Linear_bi_num ~ age_at_recruitment + pcv1_bmi,
+                      data = blood_child_who_stan, discard = "both", method = "full", 
+                      distance = "glm", caliper = 0.5)
+
+summary(m_out_pfoa)
+bal.tab(m_out_pfoa)
+f <- love.plot(m_out_pfoa)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfoa_data <- match.data(m_out_pfoa) %>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+
+## PFHxS
+m_out_pfhxs <- matchit(PFHxS_bi_num ~ age_at_recruitment + pcv1_bmi,
+                      data = blood_child_who_stan, discard = "both", method = "full", 
+                      distance = "glm", caliper = 0.5)
+
+summary(m_out_pfhxs)
+bal.tab(m_out_pfhxs)
+f <- love.plot(m_out_pfhxs)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfhxs_data <- match.data(m_out_pfhxs)%>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+
+## PFNA
+m_out_pfna <- matchit(PFNA_bi_num ~ age_at_recruitment + pcv1_bmi,
+                       data = blood_child_who_stan, discard = "both", method = "full", 
+                       distance = "glm", caliper = 0.5)
+
+summary(m_out_pfna)
+bal.tab(m_out_pfna)
+f <- love.plot(m_out_pfna)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfna_data <- match.data(m_out_pfna)%>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+
+## PFHpA
+m_out_pfhpa <- matchit(PFHpA_bi_num ~ age_at_recruitment + pcv1_bmi,
+                      data = blood_child_who_stan, discard = "both", method = "full", 
+                      distance = "glm", caliper = 0.5)
+
+summary(m_out_pfhpa)
+bal.tab(m_out_pfhpa)
+f <- love.plot(m_out_pfhpa)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfhpa_data <- match.data(m_out_pfhpa)%>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+## PFDA
+m_out_pfda <- matchit(PFDA_bi_num ~ age_at_recruitment + pcv1_bmi,
+                       data = blood_child_who_stan, discard = "both", method = "full", 
+                       distance = "glm", caliper = 0.5)
+
+summary(m_out_pfda)
+bal.tab(m_out_pfda)
+f <- love.plot(m_out_pfda)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfda_data <- match.data(m_out_pfda)%>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+## PFHpS
+m_out_pfhps <- matchit(PFHpS_bi_num ~ age_at_recruitment + pcv1_bmi,
+                      data = blood_child_who_stan, discard = "both", method = "full", 
+                      distance = "glm", caliper = 0.12)
+
+summary(m_out_pfhps)
+bal.tab(m_out_pfhps)
+f <- love.plot(m_out_pfhps)
+f + labs(title  = " ", x= "Standardized Mean Difference") + geom_vline(xintercept  = 0.1 , linetype="dotted",  color = "black", size=1.5) + geom_vline(xintercept  = -0.1 , linetype="dotted", color = "black", size=1.5)
+
+
+m_out_pfhps_data <- match.data(m_out_pfhps)%>% 
+  select(-age_at_recruitment, -pcv1_bmi, -PFHpA_bi_num, -PFDA_bi_num, -PFHpS_bi_num, -PFHxS, -PFOS_Total, -PFOA_Linear, -PFNA,
+         -PFHxS_bi_num, -PFOS_Total_bi_num, -PFOA_Linear_bi_num, -PFNA_bi_num,
+         -distance, -weights, -subclass)
+
+write_csv(m_out_pfos_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfos_data.csv")
+write_csv(m_out_pfoa_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfoa_data.csv")
+write_csv(m_out_pfhxs_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfhxs_data.csv")
+write_csv(m_out_pfna_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfna_data.csv")
+write_csv(m_out_pfhpa_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfhpa_data.csv")
+write_csv(m_out_pfda_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfda_data.csv")
+write_csv(m_out_pfhps_data, "C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/imputed and covariates balancing/m_out_pfhps_data.csv")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,412 @@
+---
+title: "S-PRESTO missing in outcomes"
+author: "Meizhen Yao"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    df_print: paged
+    fig_caption: yes
+    fig_height: 7
+    fig_width: 10
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    self_contained: yes
+    code_folding: hide
+    toc_depth: 6
+header-includes: \usepackage{multirow}
+editor_options: 
+  chunk_output_type: console
+---
+
+<style type="text/css">
+body{
+  /*font-family: Helvetica;*/
+  font-size: 12pt;
+}
+</style>
+
+
+```{r setup, include=FALSE}
+options(digits = 4)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,cache=F,warning = FALSE)
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(qwraps2_markup = "markdown")
+
+```
+
+
+```{r,message=FALSE,warning=FALSE,include=FALSE}
+
+library(data.table)  
+library(tidyverse)
+library(readxl)
+library(readr)
+library(mice)
+library(anthro)
+library(writexl)
+library(ggh4x)
+library(naniar)
+library(UpSetR)
+library(gtsummary)
+library(gt)
+library(finalfit)
+library(GGally)
+library(ggpubr)
+
+#-------------------------------------------------------import data set
+whole_cohort<-  read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/for paper/whole_cohort_20230316.csv")
+
+whole_cohort$ethnicity_specified_recat<- factor(whole_cohort$ethnicity_specified_recat,
+                                            levels = c("Chinese","Malay","Indian"))
+
+whole_cohort$pcv1_highest_education_completed_recat<- factor(whole_cohort$pcv1_highest_education_completed_recat,
+                                                         levels=c("University","Primary/Secondary/Post_secondary"))
+
+
+whole_cohort$pcv1_parity_recat<- factor(whole_cohort$pcv1_parity_recat,
+                                    levels=c("0",">= 1"))
+
+whole_cohort$pcv1_smoker<- factor(whole_cohort$pcv1_smoker,
+                                        levels=c(0:2),
+                                        labels = c("never smoke", "smoker", "ex-smoker"))
+
+whole_cohort$bw_sex<- factor(whole_cohort$bw_sex,
+                             levels=c(1, 2),
+                             labels = c("boy", "girl"))
+
+
+#-------------------------------------------------------data preparation
+
+
+## Restricted to participants with a blood sample and a live birth - blood(328)
+blood<- whole_cohort %>% 
+        filter(participation==1 & live_birth_recat==1)
+
+## remove some outliers
+blood$weight_m12<- ifelse(blood$Subject_ID==10322, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10406, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10731, NA, blood$weight_m12)
+blood$weight_m12<- ifelse(blood$Subject_ID==10442, NA, blood$weight_m12)
+blood$length_m12<- ifelse(blood$Subject_ID==10573, NA, blood$length_m12)
+
+## add days_since_birth_del_CN variable
+blood$Days_since_birth_del_CN<- rep(0, 328)
+
+
+blood$Days_since_birth_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$Days_since_birth_del)
+blood$weight_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$weight_del)
+blood$length_del<- ifelse(blood$Days_since_birth_del == -1, NA, blood$length_del)
+
+## merge variables at delivery
+del<- blood[, c('weight_del', 'length_del', 'Days_since_birth_del')]
+
+blood<- blood %>%
+  mutate(weight_del_merge = coalesce(weight_del, weight_del_CN),
+         length_del_merge = coalesce(length_del, length_del_CN),
+         Days_since_birth_del_merge = if_else(is.na(weight_del) == TRUE, 0, Days_since_birth_del))
+
+
+## only include child anthropometry variables
+weight<- c('weight_del_merge','weight_wk3','weight_wk6','weight_m3','weight_m6','weight_m12','weight_m18')
+length<- c('length_del_merge', 'length_wk3','length_wk6','length_m3','length_m6','length_m12','length_m18')
+child_age<- c('Days_since_birth_del_merge','Days_since_birth_wk3','Days_since_birth_wk6','Days_since_birth_m3','Days_since_birth_m6','Days_since_birth_m12','Days_since_birth_m18')
+
+
+
+
+## Restricted to participants who have at least delivery visit and m18 visit - blood_child_del_m18(240)
+blood_child<- blood[,c("Subject_ID", "bw_sex", "bw_birth_GA", weight, length, child_age,'age_at_recruitment', 'pcv1_smoker', 'pcv1_highest_education_completed_recat','ethnicity_specified_recat','pcv1_parity_recat','pcv1_bmi')]
+blood_child_del_m18<- blood_child[complete.cases(blood_child[,c('weight_del_merge', "length_del_merge", "Days_since_birth_del_merge", "weight_m18", "length_m18", "Days_since_birth_m18")]),]
+
+
+
+## completed cases after we drop wk1 measures - blood_child_del_m18_nowk1 (187)
+blood_child_del_m18_nowk1<- blood_child[complete.cases(blood_child),] %>% 
+                            mutate(complete= "complete")
+blood_child_del_m18<- blood_child_del_m18 %>% 
+                      left_join(blood_child_del_m18_nowk1[, c("Subject_ID", "complete")], by="Subject_ID") %>% 
+                      mutate(complete_ind = if_else(is.na(complete)==TRUE, "not complete", "complete"))
+
+
+
+# ############################ for wfl
+# 
+# blood_child_who_stan_impute_mix<-  read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_who_stan_impute_mix_dropwk1_11162023.csv")
+# 
+# blood_child_del_m18_nowk1<- blood_child_who_stan_impute_mix[complete.cases(blood_child_who_stan_impute_mix %>% select(starts_with("zwfl_internal"))),] %>% 
+#                             mutate(complete= "complete")
+# blood_child_del_m18_impute<- blood_child_who_stan_impute_mix %>% 
+#                       left_join(blood_child_del_m18_nowk1[, c("Subject_ID", "complete")], by="Subject_ID") %>% 
+#                       mutate(complete_ind = if_else(is.na(complete)==TRUE, "not complete", "complete"))
+# 
+# 
+# zwfl_internal<- c('zwfl_internal_del_merge','zwfl_internal_wk3','zwfl_internal_wk6','zwfl_internal_m3','zwfl_internal_m6','zwfl_internal_m12','weight_m18')
+
+```
+
+
+
+# Missing pattern in outcomes & age
+```{r}
+
+vis_miss(blood_child_del_m18[, c(weight, length, child_age)])
+vis_miss(blood_child_del_m18[, c(weight[1], length[1], child_age[1], weight[2], length[2], child_age[2],
+                                 weight[3], length[3], child_age[3], weight[4], length[4], child_age[4],
+                                 weight[5], length[5], child_age[5], weight[6], length[6], child_age[6], 
+                                 weight[7], length[7], child_age[7])])
+gg_miss_var(blood_child_del_m18[, c(weight, length, child_age)])
+
+
+## so we decided to drop wk1 measurements
+
+
+
+```
+
+# Check for associations variable value and missing 
+```{r}
+
+blood_child_del_m18 %>% 
+  tbl_summary(
+    include = c(age_at_recruitment, pcv1_highest_education_completed_recat, 
+                ethnicity_specified_recat, pcv1_parity_recat, pcv1_smoker,
+                pcv1_bmi, bw_sex, bw_birth_GA, complete_ind),
+    by = complete_ind,
+    missing_text = "Missing"
+  ) %>% 
+  bold_labels() %>% 
+  add_p()
+
+
+```
+
+
+# Check for associations between complete and not-complete data
+```{r}
+
+blood_child_del_m18 %>% 
+  tbl_summary(
+    include = c(age_at_recruitment, pcv1_highest_education_completed_recat, 
+                ethnicity_specified_recat, pcv1_parity_recat, pcv1_smoker,
+                pcv1_bmi, bw_sex, bw_birth_GA, complete_ind),
+    by = complete_ind,
+    missing_text = "Missing"
+  ) %>% 
+  bold_labels() %>% 
+  add_p()
+
+
+```
+
+# Check for associations between missing and observed data in each  variable
+## weights
+```{r, message=FALSE, warning=FALSE}
+
+explanatory = c('age_at_recruitment', 'pcv1_smoker', 'pcv1_highest_education_completed_recat','ethnicity_specified_recat','pcv1_parity_recat','pcv1_bmi', "bw_sex", "bw_birth_GA")
+dependent = weight
+
+# ## plot
+# plot<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none",
+#         axis.title.x = element_blank(),
+#         axis.text.x = element_blank())
+# 
+# plot_last<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none")
+# 
+# del<- ggarrange(plot[1,8], plot[1,9], plot[1,10], plot[1,11], plot[1,12], plot[1,13], plot[1,14], plot[1,15],
+#           nrow = 1, ncol = 8)
+# wk3<- ggarrange(plot[2,8], plot[2,9], plot[2,10], plot[2,11], plot[2,12], plot[2,13], plot[2,14], plot[2,15],
+#           nrow = 1, ncol = 8)
+# wk6<- ggarrange(plot[3,8], plot[3,9], plot[3,10], plot[3,11], plot[3,12], plot[3,13], plot[3,14], plot[3,15],
+#           nrow = 1, ncol = 8)
+# m3<- ggarrange(plot[4,8], plot[4,9], plot[4,10], plot[4,11], plot[4,12], plot[4,13], plot[4,14], plot[4,15],
+#           nrow = 1, ncol = 8)
+# m6<- ggarrange(plot[5,8], plot[5,9], plot[5,10], plot[5,11], plot[5,12], plot[5,13], plot[5,14], plot[5,15],
+#           nrow = 1, ncol = 8)
+# m12<- ggarrange(plot[6,8], plot[6,9], plot[6,10], plot[6,11], plot[6,12], plot[6,13], plot[6,14], plot[6,15],
+#           nrow = 1, ncol = 8)
+# m18<- ggarrange(plot_last[7,8], plot_last[7,9], plot_last[7,10], plot_last[7,11], plot_last[7,12], plot_last[7,13], plot_last[7,14], plot_last[7,15],
+#           nrow = 1, ncol = 8)
+# weight_plot<- ggarrange(del, wk3, wk6, m3, m6, m12, m18,
+#                    labels = c("delivery", "week3", 'week6', "month3", "month6", "month12", "month18"),
+#                    nrow=7, ncol=1)
+# weight_plot
+
+## table
+blood_child_del_m18 %>%  
+  missing_compare(dependent="zwfl_internal_wk3", explanatory=c(explanatory, dependent[-c(2)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="weight_wk6", explanatory=c(explanatory, dependent[-c(3)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="weight_m3", explanatory=c(explanatory, dependent[-c(4)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="weight_m6", explanatory=c(explanatory, dependent[-c(5)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="weight_m12", explanatory=c(explanatory, dependent[-c(6)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+```
+
+
+## length
+```{r, message=FALSE, warning=FALSE}
+
+explanatory = c('age_at_recruitment', 'pcv1_smoker', 'pcv1_highest_education_completed_recat','ethnicity_specified_recat','pcv1_parity_recat','pcv1_bmi', "bw_sex", "bw_birth_GA")
+dependent = length
+
+# ## plot
+# plot<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none",
+#         axis.title.x = element_blank(),
+#         axis.text.x = element_blank())
+# 
+# plot_last<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none")
+# 
+# del<- ggarrange(plot[1,8], plot[1,9], plot[1,10], plot[1,11], plot[1,12], plot[1,13], plot[1,14], plot[1,15],
+#           nrow = 1, ncol = 8)
+# wk3<- ggarrange(plot[2,8], plot[2,9], plot[2,10], plot[2,11], plot[2,12], plot[2,13], plot[2,14], plot[2,15],
+#           nrow = 1, ncol = 8)
+# wk6<- ggarrange(plot[3,8], plot[3,9], plot[3,10], plot[3,11], plot[3,12], plot[3,13], plot[3,14], plot[3,15],
+#           nrow = 1, ncol = 8)
+# m3<- ggarrange(plot[4,8], plot[4,9], plot[4,10], plot[4,11], plot[4,12], plot[4,13], plot[4,14], plot[4,15],
+#           nrow = 1, ncol = 8)
+# m6<- ggarrange(plot[5,8], plot[5,9], plot[5,10], plot[5,11], plot[5,12], plot[5,13], plot[5,14], plot[5,15],
+#           nrow = 1, ncol = 8)
+# m12<- ggarrange(plot[6,8], plot[6,9], plot[6,10], plot[6,11], plot[6,12], plot[6,13], plot[6,14], plot[6,15],
+#           nrow = 1, ncol = 8)
+# m18<- ggarrange(plot_last[7,8], plot_last[7,9], plot_last[7,10], plot_last[7,11], plot_last[7,12], plot_last[7,13], plot_last[7,14], plot_last[7,15],
+#           nrow = 1, ncol = 8)
+# length_plot<- ggarrange(del, wk3, wk6, m3, m6, m12, m18,
+#                    labels = c("delivery", "week3", 'week6', "month3", "month6", "month12", "month18"),
+#                    nrow=7, ncol=1)
+# length_plot
+
+## table
+blood_child_del_m18 %>%  
+  missing_compare(dependent="length_wk3", explanatory=c(explanatory, dependent[-c(2)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="length_wk6", explanatory=c(explanatory, dependent[-c(3)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="length_m3", explanatory=c(explanatory, dependent[-c(4)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="length_m6", explanatory=c(explanatory, dependent[-c(5)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="length_m12", explanatory=c(explanatory, dependent[-c(6)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+```
+
+
+
+## child age
+```{r, message=FALSE, warning=FALSE}
+
+explanatory = c('age_at_recruitment', 'pcv1_smoker', 'pcv1_highest_education_completed_recat','ethnicity_specified_recat','pcv1_parity_recat','pcv1_bmi', "bw_sex", "bw_birth_GA")
+dependent = child_age
+# 
+# ## plot
+# plot<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none",
+#         axis.title.x = element_blank(),
+#         axis.text.x = element_blank())
+# 
+# plot_last<- blood_child_del_m18 %>% 
+#   missing_pairs(dependent, explanatory, position = "fill")+ 
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "none")
+# 
+# del<- ggarrange(plot[1,8], plot[1,9], plot[1,10], plot[1,11], plot[1,12], plot[1,13], plot[1,14], plot[1,15],
+#           nrow = 1, ncol = 8)
+# wk3<- ggarrange(plot[2,8], plot[2,9], plot[2,10], plot[2,11], plot[2,12], plot[2,13], plot[2,14], plot[2,15],
+#           nrow = 1, ncol = 8)
+# wk6<- ggarrange(plot[3,8], plot[3,9], plot[3,10], plot[3,11], plot[3,12], plot[3,13], plot[3,14], plot[3,15],
+#           nrow = 1, ncol = 8)
+# m3<- ggarrange(plot[4,8], plot[4,9], plot[4,10], plot[4,11], plot[4,12], plot[4,13], plot[4,14], plot[4,15],
+#           nrow = 1, ncol = 8)
+# m6<- ggarrange(plot[5,8], plot[5,9], plot[5,10], plot[5,11], plot[5,12], plot[5,13], plot[5,14], plot[5,15],
+#           nrow = 1, ncol = 8)
+# m12<- ggarrange(plot[6,8], plot[6,9], plot[6,10], plot[6,11], plot[6,12], plot[6,13], plot[6,14], plot[6,15],
+#           nrow = 1, ncol = 8)
+# m18<- ggarrange(plot_last[7,8], plot_last[7,9], plot_last[7,10], plot_last[7,11], plot_last[7,12], plot_last[7,13], plot_last[7,14], plot_last[7,15],
+#           nrow = 1, ncol = 8)
+# age_plot<- ggarrange(del, wk3, wk6, m3, m6, m12, m18,
+#                    labels = c("delivery", "week3", 'week6', "month3", "month6", "month12", "month18"),
+#                    nrow=7, ncol=1)
+# age_plot
+
+## table
+blood_child_del_m18 %>%  
+  missing_compare(dependent="Days_since_birth_wk3", explanatory=c(explanatory, dependent[-c(2)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="Days_since_birth_wk6", explanatory=c(explanatory, dependent[-c(3)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="Days_since_birth_m3", explanatory=c(explanatory, dependent[-c(4)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="Days_since_birth_m6", explanatory=c(explanatory, dependent[-c(5)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+
+blood_child_del_m18 %>%  
+  missing_compare(dependent="Days_since_birth_m12", explanatory=c(explanatory, dependent[-c(6)])) %>% 
+  knitr::kable(row.names=FALSE, align = c("l", "l", "r", "r", "r"))
+
+```
+
+
+
+
+
+
+
+
+
+
+

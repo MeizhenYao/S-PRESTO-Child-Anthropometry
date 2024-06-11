@@ -93,7 +93,7 @@ library(naniar)
 library(UpSetR)
 
 #-------------------------------------------------------import data set
-blood_child_who_stan<- read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_who_stan_complete_05262023.csv")
+blood_child_who_stan<- read_csv("C:/Users/yaom03/OneDrive - The Mount Sinai Hospital/Documents/Projects/S-PRESTO/input/anthropometry/blood_child_who_stan_complete_dropwk1_06062023.csv")
 
 
  
@@ -602,7 +602,6 @@ blood_child_zwfl_plot2
 ```{r, warning=FALSE, message=FALSE}
 zwfl_table<-  blood_child_who_stan %>%
               select(zwfl_internal_del_merge,
-                     zwfl_internal_wk1,
                      zwfl_internal_wk3,
                      zwfl_internal_wk6,
                      zwfl_internal_m3,
@@ -632,6 +631,7 @@ gg_miss_var(blood_child_zwfl)
 
 ```
 
+
 ## boxplot
 ```{r, warning=FALSE, message=FALSE}
 # data preparation
@@ -647,7 +647,7 @@ blood_child_zwfl_long <- blood_child_who_stan %>%
 
 
 blood_child_zwfl_long$zwfl_internal_time <- factor(blood_child_zwfl_long$zwfl_internal_time,
-                                          levels = c("del_merge","wk1", "wk3", "wk6", "m3", "m6", "m12", "m18"))
+                                          levels = c("del_merge", "wk3", "wk6", "m3", "m6", "m12", "m18"))
 
 ## assign visit variable
 blood_child_zwfl_long_visit <- blood_child_zwfl_long %>%
@@ -658,6 +658,7 @@ blood_child_zwfl_long_visit <- blood_child_zwfl_long %>%
 
 
 ```
+
 
 
 ```{r, warning=FALSE, message=FALSE}
